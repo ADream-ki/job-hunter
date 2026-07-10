@@ -1,0 +1,113 @@
+name: Release Mobile Test
+
+on:
+  push:
+    tags:
+      - "mobile-test-v*"
+  workflow_dispatch:
+    inputs:
+      codeup_ref:
+        description: "Codeup ref to build"
+        required: false
+        default: "main"
+
+permissions:
+  contents: read
+
+env:
+  CODEUP_REPOSITORY: ethan@codeup:codeup/job-hunter.git
+
+jobs:
+  android_release_test:
+    name: Android release test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure Codeup SSH
+        env:
+          CODEUP_SSH_PRIVATE_KEY_B64: ${{ secrets.CODEUP_SSH_PRIVATE_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s' "$CODEUP_SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/codeup
+          chmod 600 ~/.ssh/codeup
+          ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host codeup
+            HostName ethan-cn-shenzhen.devops.aliyuncs.com
+            User ethan
+            IdentityFile $HOME/.ssh/codeup
+            IdentitiesOnly yes
+            PubkeyAcceptedAlgorithms +ssh-rsa
+            PubkeyAcceptedKeyTypes +ssh-rsa
+            HostkeyAlgorithms +ssh-rsa
+          EOF
+
+      - name: Clone Codeup source
+        run: |
+          set -euo pipefail
+          git clone "$CODEUP_REPOSITORY" source
+          cd source
+          git fetch --tags origin
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            codeup_tag="${GITHUB_REF_NAME#mobile-test-}"
+            if git rev-parse -q --verify "refs/tags/${codeup_tag}" >/dev/null; then
+              git checkout "${codeup_tag}"
+            else
+              git checkout main
+            fi
+          else
+            git checkout "${{ inputs.codeup_ref }}"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        working-directory: source
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9 --activate
+          pnpm install --no-frozen-lockfile
+          pnpm check:mobile
+          pnpm --filter @job-tool/mobile exec expo install --check
+
+      - name: Build Android release APK
+        working-directory: source
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd mobile
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > android-release.keystore
+          pnpm exec expo prebuild --platform android
+          cp android-release.keystore android/app/android-release.keystore
+          node ../scripts/ci-patch-android-release-signing.mjs
+          cd android
+          ./gradlew assembleRelease
+
+      - name: Stage test APK
+        working-directory: source
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          suffix="${GITHUB_REF_NAME:-manual}"
+          suffix="${suffix//[^A-Za-z0-9._-]/_}"
+          mkdir -p mobile/.release-test-assets
+          cp mobile/android/app/build/outputs/apk/release/app-release*.apk "mobile/.release-test-assets/Career.Harbor.Mobile_${version}_${suffix}_android_test.apk"
+          ls -lh mobile/.release-test-assets
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-release-test-apk
+          path: source/mobile/.release-test-assets/*.apk
+          retention-days: 3

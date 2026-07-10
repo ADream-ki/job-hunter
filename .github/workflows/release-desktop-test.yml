@@ -1,0 +1,105 @@
+name: Release Desktop Test
+
+on:
+  push:
+    tags:
+      - "desktop-test-v*"
+  workflow_dispatch:
+    inputs:
+      codeup_ref:
+        description: "Codeup ref to build"
+        required: false
+        default: "main"
+
+permissions:
+  contents: read
+
+env:
+  CODEUP_REPOSITORY: ethan@codeup:codeup/job-hunter.git
+
+jobs:
+  windows_release_test:
+    name: Windows desktop release test
+    runs-on: windows-latest
+    steps:
+      - name: Configure Codeup SSH
+        shell: bash
+        env:
+          CODEUP_SSH_PRIVATE_KEY_B64: ${{ secrets.CODEUP_SSH_PRIVATE_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s' "$CODEUP_SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/codeup
+          chmod 600 ~/.ssh/codeup
+          ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host codeup
+            HostName ethan-cn-shenzhen.devops.aliyuncs.com
+            User ethan
+            IdentityFile $HOME/.ssh/codeup
+            IdentitiesOnly yes
+            PubkeyAcceptedAlgorithms +ssh-rsa
+            PubkeyAcceptedKeyTypes +ssh-rsa
+            HostkeyAlgorithms +ssh-rsa
+          EOF
+
+      - name: Clone Codeup source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone "$CODEUP_REPOSITORY" source
+          cd source
+          git fetch --tags origin
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            codeup_tag="${GITHUB_REF_NAME#desktop-test-}"
+            if git rev-parse -q --verify "refs/tags/${codeup_tag}" >/dev/null; then
+              git checkout "${codeup_tag}"
+            else
+              git checkout main
+            fi
+          else
+            git checkout "${{ inputs.codeup_ref }}"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        shell: pwsh
+        working-directory: source
+        run: |
+          corepack enable
+          corepack prepare pnpm@9 --activate
+          pnpm install --no-frozen-lockfile
+
+      - name: Build Windows installer and portable package
+        shell: pwsh
+        working-directory: source
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npm.cmd --prefix desktop run tauri:build -- --bundles nsis
+          cargo build --release --manifest-path desktop/src-tauri/Cargo.toml --bin job_tool --target-dir .codex-cargo-target/desktop-tauri
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $dist = "dist-release"
+          $stage = Join-Path $dist "Career Harbor $version x64 test"
+          $zip = Join-Path $dist "Career.Harbor_${version}_${env:GITHUB_REF_NAME}_x64_portable_test.zip"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job-tool-desktop.exe" -Destination (Join-Path $stage "Career Harbor.exe") -Force
+          Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job_tool.exe" -Destination (Join-Path $stage "career-harbor-cli.exe") -Force
+          Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job_tool.exe" -Destination (Join-Path $stage "career-harbor-updater.exe") -Force
+          Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force
+          New-Item -ItemType Directory -Force -Path "desktop/.release-test-assets" | Out-Null
+          Copy-Item "desktop/src-tauri/target/release/bundle/nsis/*" "desktop/.release-test-assets/" -Force -ErrorAction SilentlyContinue
+          Copy-Item ".codex-cargo-target/desktop-tauri/release/bundle/nsis/*" "desktop/.release-test-assets/" -Force -ErrorAction SilentlyContinue
+          Copy-Item "dist-release/*_test.zip" "desktop/.release-test-assets/" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-test-assets
+          path: source/desktop/.release-test-assets/*
+          retention-days: 3
