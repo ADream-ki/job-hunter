@@ -27,11 +27,11 @@ jobs:
     steps:
       - name: Configure Codeup SSH
         env:
-          CODEUP_SSH_PRIVATE_KEY: ${{ secrets.CODEUP_SSH_PRIVATE_KEY }}
+          CODEUP_SSH_PRIVATE_KEY_B64: ${{ secrets.CODEUP_SSH_PRIVATE_KEY_B64 }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          printf '%s\n' "$CODEUP_SSH_PRIVATE_KEY" > ~/.ssh/codeup
+          printf '%s' "$CODEUP_SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/codeup
           chmod 600 ~/.ssh/codeup
           ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
 
