@@ -109,5 +109,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mobile-release-test-apk
-          path: source/mobile/.release-test-assets/*.apk
+          path: ${{ github.workspace }}/source/mobile/.release-test-assets/*.apk
+          if-no-files-found: error
           retention-days: 3
