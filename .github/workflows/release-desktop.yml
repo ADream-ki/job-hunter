@@ -35,11 +35,11 @@ jobs:
           printf '%s\n' "$CODEUP_SSH_PRIVATE_KEY" > ~/.ssh/codeup
           chmod 600 ~/.ssh/codeup
           ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
-          cat > ~/.ssh/config <<'EOF'
+          cat > ~/.ssh/config <<EOF
           Host codeup
             HostName ethan-cn-shenzhen.devops.aliyuncs.com
             User ethan
-            IdentityFile ~/.ssh/codeup
+            IdentityFile $HOME/.ssh/codeup
             IdentitiesOnly yes
           EOF
 
