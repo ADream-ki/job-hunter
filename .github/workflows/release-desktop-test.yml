@@ -101,6 +101,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-release-test-assets
-          path: ${{ github.workspace }}/source/desktop/.release-test-assets/*
+          path: ${{ github.workspace }}/**/.release-test-assets/*
           if-no-files-found: error
           retention-days: 3
