@@ -12,7 +12,7 @@ on:
         default: "main"
 
 env:
-  CODEUP_REPOSITORY: ethan@ethan-cn-shenzhen.devops.aliyuncs.com:codeup/ldxp-license-refill-go.git
+  CODEUP_REPOSITORY: ethan@codeup:codeup/ldxp-license-refill-go.git
 
 jobs:
   deploy:
@@ -27,14 +27,22 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s' "$CODEUP_SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/codeup
           chmod 600 ~/.ssh/codeup
-          ssh-keygen -lf ~/.ssh/codeup
           ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
-          ssh -vvv -i "$HOME/.ssh/codeup" -o IdentitiesOnly=yes -o PubkeyAcceptedAlgorithms=+ssh-rsa -o PubkeyAcceptedKeyTypes=+ssh-rsa -o HostkeyAlgorithms=+ssh-rsa -T ethan@ethan-cn-shenzhen.devops.aliyuncs.com || true
+          cat > ~/.ssh/config <<EOF
+          Host codeup
+            HostName ethan-cn-shenzhen.devops.aliyuncs.com
+            User ethan
+            IdentityFile $HOME/.ssh/codeup
+            IdentitiesOnly yes
+            PubkeyAcceptedAlgorithms +ssh-rsa
+            PubkeyAcceptedKeyTypes +ssh-rsa
+            HostkeyAlgorithms +ssh-rsa
+          EOF
 
       - name: Clone Codeup source
         run: |
           set -euo pipefail
-          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/codeup -o IdentitiesOnly=yes -o PubkeyAcceptedAlgorithms=+ssh-rsa -o PubkeyAcceptedKeyTypes=+ssh-rsa -o HostkeyAlgorithms=+ssh-rsa" git clone "$CODEUP_REPOSITORY" source
+          git clone "$CODEUP_REPOSITORY" source
           cd source
           git fetch --tags origin
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then

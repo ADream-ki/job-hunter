@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 env:
-  CODEUP_REPOSITORY: ethan@ethan-cn-shenzhen.devops.aliyuncs.com:codeup/job-hunter.git
+  CODEUP_REPOSITORY: ethan@codeup:codeup/job-hunter.git
   GITHUB_REPOSITORY: ADream-ki/job-hunter
   R2_OBJECT_PREFIX: career-harbor
   R2_PUBLIC_BASE_URL: https://download.o2dream.cc
@@ -34,11 +34,21 @@ jobs:
           printf '%s' "$CODEUP_SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/codeup
           chmod 600 ~/.ssh/codeup
           ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host codeup
+            HostName ethan-cn-shenzhen.devops.aliyuncs.com
+            User ethan
+            IdentityFile $HOME/.ssh/codeup
+            IdentitiesOnly yes
+            PubkeyAcceptedAlgorithms +ssh-rsa
+            PubkeyAcceptedKeyTypes +ssh-rsa
+            HostkeyAlgorithms +ssh-rsa
+          EOF
 
       - name: Clone Codeup source
         run: |
           set -euo pipefail
-          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/codeup -o IdentitiesOnly=yes -o PubkeyAcceptedAlgorithms=+ssh-rsa -o HostkeyAlgorithms=+ssh-rsa" git clone "$CODEUP_REPOSITORY" source
+          git clone "$CODEUP_REPOSITORY" source
           cd source
           git fetch --tags origin
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
