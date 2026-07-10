@@ -93,14 +93,14 @@ jobs:
           Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job_tool.exe" -Destination (Join-Path $stage "career-harbor-cli.exe") -Force
           Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job_tool.exe" -Destination (Join-Path $stage "career-harbor-updater.exe") -Force
           Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force
-          New-Item -ItemType Directory -Force -Path "desktop/.release-test-assets" | Out-Null
-          Copy-Item "desktop/src-tauri/target/release/bundle/nsis/*" "desktop/.release-test-assets/" -Force -ErrorAction SilentlyContinue
-          Copy-Item ".codex-cargo-target/desktop-tauri/release/bundle/nsis/*" "desktop/.release-test-assets/" -Force -ErrorAction SilentlyContinue
-          Copy-Item "dist-release/*_test.zip" "desktop/.release-test-assets/" -Force
+          New-Item -ItemType Directory -Force -Path "desktop/release-test-assets" | Out-Null
+          Copy-Item "desktop/src-tauri/target/release/bundle/nsis/*" "desktop/release-test-assets/" -Force -ErrorAction SilentlyContinue
+          Copy-Item ".codex-cargo-target/desktop-tauri/release/bundle/nsis/*" "desktop/release-test-assets/" -Force -ErrorAction SilentlyContinue
+          Copy-Item "dist-release/*_test.zip" "desktop/release-test-assets/" -Force
 
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-release-test-assets
-          path: ${{ github.workspace }}/**/.release-test-assets/*
+          path: ${{ github.workspace }}/**/release-test-assets/*
           if-no-files-found: error
           retention-days: 3

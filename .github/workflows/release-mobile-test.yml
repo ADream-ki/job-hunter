@@ -103,14 +103,14 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           suffix="${GITHUB_REF_NAME:-manual}"
           suffix="${suffix//[^A-Za-z0-9._-]/_}"
-          mkdir -p mobile/.release-test-assets
-          cp mobile/android/app/build/outputs/apk/release/app-release*.apk "mobile/.release-test-assets/Career.Harbor.Mobile_${version}_${suffix}_android_test.apk"
-          ls -lh mobile/.release-test-assets
-          find "$GITHUB_WORKSPACE" -path "*/.release-test-assets/*.apk" -print
+          mkdir -p mobile/release-test-assets
+          cp mobile/android/app/build/outputs/apk/release/app-release*.apk "mobile/release-test-assets/Career.Harbor.Mobile_${version}_${suffix}_android_test.apk"
+          ls -lh mobile/release-test-assets
+          find "$GITHUB_WORKSPACE" -path "*/release-test-assets/*.apk" -print
 
       - uses: actions/upload-artifact@v4
         with:
           name: mobile-release-test-apk
-          path: ${{ github.workspace }}/**/.release-test-assets/*.apk
+          path: ${{ github.workspace }}/**/release-test-assets/*.apk
           if-no-files-found: error
           retention-days: 3
