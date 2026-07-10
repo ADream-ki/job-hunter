@@ -1,0 +1,62 @@
+name: Deploy License Refill
+
+on:
+  push:
+    tags:
+      - "license-v*"
+  workflow_dispatch:
+    inputs:
+      codeup_ref:
+        description: "Codeup ref to deploy"
+        required: false
+        default: "main"
+
+env:
+  CODEUP_REPOSITORY: ethan@ethan-cn-shenzhen.devops.aliyuncs.com:codeup/ldxp-license-refill-go.git
+
+jobs:
+  deploy:
+    name: Deploy license refill service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure Codeup SSH
+        env:
+          CODEUP_SSH_PRIVATE_KEY: ${{ secrets.CODEUP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$CODEUP_SSH_PRIVATE_KEY" > ~/.ssh/codeup
+          chmod 600 ~/.ssh/codeup
+          ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
+
+      - name: Clone Codeup source
+        run: |
+          set -euo pipefail
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/codeup -o IdentitiesOnly=yes" git clone "$CODEUP_REPOSITORY" source
+          cd source
+          git fetch --tags origin
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            ref="${GITHUB_REF_NAME#license-}"
+            git checkout "$ref"
+          else
+            git checkout "${{ inputs.codeup_ref }}"
+          fi
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Test service
+        working-directory: source
+        run: |
+          go test ./...
+
+      - name: Deploy service
+        working-directory: source
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: 194.169.54.79
+          DEPLOY_USER: root
+          DEPLOY_PATH: /opt/ldxp-license-refill-go
+        run: |
+          sh scripts/deploy.sh

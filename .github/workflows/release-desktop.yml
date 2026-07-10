@@ -1,0 +1,149 @@
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch:
+    inputs:
+      codeup_ref:
+        description: "Codeup ref to build"
+        required: false
+        default: "main"
+
+permissions:
+  contents: write
+
+env:
+  CODEUP_REPOSITORY: ethan@ethan-cn-shenzhen.devops.aliyuncs.com:codeup/job-hunter.git
+  GITHUB_REPOSITORY: ADream-ki/job-hunter
+  R2_OBJECT_PREFIX: career-harbor
+  R2_PUBLIC_BASE_URL: https://download.o2dream.cc
+
+jobs:
+  windows_release:
+    name: Windows desktop release
+    runs-on: windows-latest
+    steps:
+      - name: Configure Codeup SSH
+        shell: bash
+        env:
+          CODEUP_SSH_PRIVATE_KEY: ${{ secrets.CODEUP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$CODEUP_SSH_PRIVATE_KEY" > ~/.ssh/codeup
+          chmod 600 ~/.ssh/codeup
+          ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<'EOF'
+          Host codeup
+            HostName ethan-cn-shenzhen.devops.aliyuncs.com
+            User ethan
+            IdentityFile ~/.ssh/codeup
+            IdentitiesOnly yes
+          EOF
+
+      - name: Clone Codeup source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone "$CODEUP_REPOSITORY" source
+          cd source
+          git fetch --tags origin
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            git checkout "$GITHUB_REF_NAME"
+          else
+            git checkout "${{ inputs.codeup_ref }}"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        shell: pwsh
+        working-directory: source
+        run: |
+          corepack enable
+          corepack prepare pnpm@9 --activate
+          pnpm install --no-frozen-lockfile
+
+      - name: Validate tag version
+        shell: pwsh
+        working-directory: source
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $tag = "${env:GITHUB_REF_NAME}"
+          if ([string]::IsNullOrWhiteSpace($tag) -or "${env:GITHUB_REF_TYPE}" -ne "tag") {
+            $tag = "desktop-v$version"
+          }
+          if ($tag -ne "desktop-v$version") {
+            throw "Release tag $tag does not match desktop-v$version."
+          }
+
+      - name: Build Windows installer and portable package
+        shell: pwsh
+        working-directory: source
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npm.cmd --prefix desktop run tauri:build -- --bundles nsis
+          cargo build --release --manifest-path desktop/src-tauri/Cargo.toml --bin job_tool --target-dir .codex-cargo-target/desktop-tauri
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $source = ".codex-cargo-target/desktop-tauri/release/job-tool-desktop.exe"
+          $dist = "dist-release"
+          $stage = Join-Path $dist "Career Harbor $version x64"
+          $zip = Join-Path $dist "Career.Harbor_${version}_x64_portable.zip"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -LiteralPath $source -Destination (Join-Path $stage "Career Harbor.exe") -Force
+          Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job_tool.exe" -Destination (Join-Path $stage "career-harbor-cli.exe") -Force
+          Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job_tool.exe" -Destination (Join-Path $stage "career-harbor-updater.exe") -Force
+          Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force
+
+      - name: Build release metadata
+        shell: pwsh
+        working-directory: source
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $env:RELEASE_TAG = "v$version"
+          $env:RELEASE_DOWNLOAD_BASE_URL = "${env:R2_PUBLIC_BASE_URL}/${env:R2_OBJECT_PREFIX}/desktop/releases/$version"
+          $env:RELEASE_UPDATER_MANIFEST_OUTPUT = "desktop/.codex-temp/release-assets/latest.json"
+          $env:DESKTOP_UPDATER_TARGET = "windows-x86_64"
+          node scripts/build-release-updater-manifest.mjs
+          $env:RELEASE_NOTES_OUTPUT = "desktop/.codex-temp/release-assets/RELEASE_NOTES.md"
+          node scripts/generate-release-notes.mjs
+          $env:PORTABLE_ZIP_PATH = "dist-release/Career.Harbor_${version}_x64_portable.zip"
+          $env:PORTABLE_UPDATER_MANIFEST_OUTPUT = "desktop/.codex-temp/release-assets/portable-latest.json"
+          node scripts/build-portable-updater-manifest.mjs
+          New-Item -ItemType Directory -Force -Path "desktop/.codex-temp/release-assets" | Out-Null
+          Copy-Item "desktop/src-tauri/target/release/bundle/nsis/*" "desktop/.codex-temp/release-assets/" -Force -ErrorAction SilentlyContinue
+          Copy-Item ".codex-cargo-target/desktop-tauri/release/bundle/nsis/*" "desktop/.codex-temp/release-assets/" -Force -ErrorAction SilentlyContinue
+          Copy-Item "dist-release/*.zip" "desktop/.codex-temp/release-assets/" -Force
+
+      - name: Publish desktop artifacts
+        shell: pwsh
+        working-directory: source
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          node scripts/publish-r2-object.mjs --file desktop/.codex-temp/release-assets/latest.json --key career-harbor/desktop/latest.json --content-type "application/json; charset=utf-8" --cache-control "no-store, max-age=0, must-revalidate"
+          $env:GITHUB_RELEASE_TAG = "desktop-v$version"
+          $env:GITHUB_RELEASE_NAME = "Career Harbor Desktop $version"
+          $env:GITHUB_RELEASE_BODY = "desktop/.codex-temp/release-assets/RELEASE_NOTES.md"
+          node scripts/publish-github-release.mjs "desktop/.codex-temp/release-assets/*"
+          node scripts/prune-r2-release-versions.mjs --prefix career-harbor/desktop/releases --keep 2
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-assets
+          path: |
+            source/desktop/.codex-temp/release-assets/*
+            source/dist-release/*.zip

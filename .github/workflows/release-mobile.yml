@@ -1,0 +1,109 @@
+name: Release Mobile
+
+on:
+  push:
+    tags:
+      - "mobile-v*"
+  workflow_dispatch:
+    inputs:
+      codeup_ref:
+        description: "Codeup ref to build"
+        required: false
+        default: "main"
+
+permissions:
+  contents: write
+
+env:
+  CODEUP_REPOSITORY: ethan@ethan-cn-shenzhen.devops.aliyuncs.com:codeup/job-hunter.git
+  GITHUB_REPOSITORY: ADream-ki/job-hunter
+  R2_OBJECT_PREFIX: career-harbor
+  R2_PUBLIC_BASE_URL: https://download.o2dream.cc
+
+jobs:
+  android_release:
+    name: Android release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure Codeup SSH
+        env:
+          CODEUP_SSH_PRIVATE_KEY: ${{ secrets.CODEUP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$CODEUP_SSH_PRIVATE_KEY" > ~/.ssh/codeup
+          chmod 600 ~/.ssh/codeup
+          ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
+
+      - name: Clone Codeup source
+        run: |
+          set -euo pipefail
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/codeup -o IdentitiesOnly=yes" git clone "$CODEUP_REPOSITORY" source
+          cd source
+          git fetch --tags origin
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            git checkout "$GITHUB_REF_NAME"
+          else
+            git checkout "${{ inputs.codeup_ref }}"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        working-directory: source
+        run: |
+          corepack enable
+          corepack prepare pnpm@9 --activate
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @job-tool/mobile exec expo install --check
+
+      - name: Build Android APK
+        working-directory: source
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd mobile
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > android-release.keystore
+          pnpm exec expo prebuild --platform android
+          cp android-release.keystore android/app/android-release.keystore
+          node ../scripts/ci-patch-android-release-signing.mjs
+          cd android
+          ./gradlew assembleRelease
+
+      - name: Publish mobile artifacts
+        working-directory: source
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#mobile-v}"
+          if [ -z "$version" ] || [ "$version" = "$GITHUB_REF_NAME" ]; then
+            version="$(node -p "require('./package.json').version")"
+          fi
+          mkdir -p mobile/.release-assets
+          cp mobile/android/app/build/outputs/apk/release/app-release*.apk "mobile/.release-assets/Career.Harbor.Mobile_${version}_android.apk"
+          node scripts/publish-r2-object.mjs --file "mobile/.release-assets/Career.Harbor.Mobile_${version}_android.apk" --key "career-harbor/mobile/releases/${version}/Career.Harbor.Mobile_android.apk" --content-type "application/vnd.android.package-archive" --cache-control "public, max-age=31536000, immutable"
+          export GITHUB_RELEASE_TAG="mobile-v${version}"
+          export GITHUB_RELEASE_NAME="Career Harbor Mobile ${version}"
+          node scripts/publish-github-release.mjs "mobile/.release-assets/*.apk"
+          node scripts/prune-r2-release-versions.mjs --prefix career-harbor/mobile/releases --keep 2
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-release-assets
+          path: source/mobile/.release-assets/*.apk
