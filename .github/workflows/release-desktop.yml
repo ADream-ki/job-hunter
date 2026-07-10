@@ -41,13 +41,15 @@ jobs:
             User ethan
             IdentityFile $HOME/.ssh/codeup
             IdentitiesOnly yes
+            PubkeyAcceptedAlgorithms +ssh-rsa
+            HostkeyAlgorithms +ssh-rsa
           EOF
 
       - name: Clone Codeup source
         shell: bash
         run: |
           set -euo pipefail
-          git clone "$CODEUP_REPOSITORY" source
+          GIT_SSH_COMMAND="ssh -o PubkeyAcceptedAlgorithms=+ssh-rsa -o HostkeyAlgorithms=+ssh-rsa" git clone "$CODEUP_REPOSITORY" source
           cd source
           git fetch --tags origin
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then

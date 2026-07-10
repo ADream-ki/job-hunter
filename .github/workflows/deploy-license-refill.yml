@@ -32,7 +32,7 @@ jobs:
       - name: Clone Codeup source
         run: |
           set -euo pipefail
-          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/codeup -o IdentitiesOnly=yes" git clone "$CODEUP_REPOSITORY" source
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/codeup -o IdentitiesOnly=yes -o PubkeyAcceptedAlgorithms=+ssh-rsa -o HostkeyAlgorithms=+ssh-rsa" git clone "$CODEUP_REPOSITORY" source
           cd source
           git fetch --tags origin
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
