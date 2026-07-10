@@ -29,11 +29,12 @@ jobs:
           chmod 600 ~/.ssh/codeup
           ssh-keygen -lf ~/.ssh/codeup
           ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
+          ssh -vvv -i "$HOME/.ssh/codeup" -o IdentitiesOnly=yes -o PubkeyAcceptedAlgorithms=+ssh-rsa -o PubkeyAcceptedKeyTypes=+ssh-rsa -o HostkeyAlgorithms=+ssh-rsa -T ethan@ethan-cn-shenzhen.devops.aliyuncs.com || true
 
       - name: Clone Codeup source
         run: |
           set -euo pipefail
-          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/codeup -o IdentitiesOnly=yes -o PubkeyAcceptedAlgorithms=+ssh-rsa -o HostkeyAlgorithms=+ssh-rsa" git clone "$CODEUP_REPOSITORY" source
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/codeup -o IdentitiesOnly=yes -o PubkeyAcceptedAlgorithms=+ssh-rsa -o PubkeyAcceptedKeyTypes=+ssh-rsa -o HostkeyAlgorithms=+ssh-rsa" git clone "$CODEUP_REPOSITORY" source
           cd source
           git fetch --tags origin
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
