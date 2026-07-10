@@ -27,6 +27,7 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s' "$CODEUP_SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/codeup
           chmod 600 ~/.ssh/codeup
+          ssh-keygen -lf ~/.ssh/codeup
           ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
 
       - name: Clone Codeup source
