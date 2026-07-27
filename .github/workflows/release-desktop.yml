@@ -70,7 +70,7 @@ jobs:
         working-directory: source
         run: |
           corepack enable
-          corepack prepare pnpm@9 --activate
+          corepack prepare pnpm@10.32.1 --activate
           pnpm install --no-frozen-lockfile
 
       - name: Validate tag version
@@ -104,6 +104,24 @@ jobs:
           Copy-Item -LiteralPath $source -Destination (Join-Path $stage "Career Harbor.exe") -Force
           Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job_tool.exe" -Destination (Join-Path $stage "career-harbor-cli.exe") -Force
           Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job_tool.exe" -Destination (Join-Path $stage "career-harbor-updater.exe") -Force
+          $llamaStage = Join-Path $stage "llama"
+          $llamaTemp = Join-Path $env:RUNNER_TEMP "llama"
+          New-Item -ItemType Directory -Force -Path $llamaStage,$llamaTemp,(Join-Path $llamaStage "models") | Out-Null
+          $llamaZip = Join-Path $llamaTemp "llama-win-vulkan.zip"
+          curl.exe -L --fail --retry 3 -o $llamaZip "https://github.com/ggml-org/llama.cpp/releases/download/b9967/llama-b9967-bin-win-vulkan-x64.zip"
+          Expand-Archive -LiteralPath $llamaZip -DestinationPath $llamaStage -Force
+          @"
+          Career Harbor local AI model
+
+          Download URL:
+          https://download.o2dream.cc/career-harbor/models/Qwen3-1.7B-Q8_0.gguf
+
+          Save as:
+          llama/models/Qwen3-1.7B-Q8_0.gguf
+
+          SHA256:
+          061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a
+          "@ | Set-Content -Encoding UTF8 (Join-Path $llamaStage "MODEL_DOWNLOAD.txt")
           Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force
 
       - name: Build release metadata
@@ -150,3 +168,4 @@ jobs:
           path: |
             source/desktop/.codex-temp/release-assets/*
             source/dist-release/*.zip
+          retention-days: 1
