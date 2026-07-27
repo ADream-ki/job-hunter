@@ -51,11 +51,11 @@ jobs:
           cd source
           git fetch --tags origin
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-            codeup_tag="${GITHUB_REF_NAME#desktop-test-}"
-            if git rev-parse -q --verify "refs/tags/${codeup_tag}" >/dev/null; then
-              git checkout "${codeup_tag}"
+            if git rev-parse -q --verify "refs/tags/${GITHUB_REF_NAME}" >/dev/null; then
+              git checkout "${GITHUB_REF_NAME}"
             else
-              git checkout main
+              echo "Codeup tag ${GITHUB_REF_NAME} does not exist."
+              exit 1
             fi
           else
             git checkout "${{ inputs.codeup_ref }}"
@@ -121,4 +121,4 @@ jobs:
           name: desktop-release-test-assets
           path: ${{ github.workspace }}/**/release-test-assets/*
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 1
