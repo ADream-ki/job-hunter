@@ -74,7 +74,7 @@ jobs:
           corepack prepare pnpm@10.32.1 --activate
           pnpm config set node-linker hoisted
           pnpm install --no-frozen-lockfile
-          node mobile/node_modules/llama.rn/install/download-native-artifacts.js
+          node node_modules/llama.rn/install/download-native-artifacts.js
           pnpm check:mobile
           pnpm --filter @job-tool/mobile exec expo install --check
 
