@@ -130,18 +130,27 @@ jobs:
           if ($process.HasExited) {
             throw "Portable desktop executable exited during startup smoke test with code $($process.ExitCode)."
           }
-          Add-Type -AssemblyName System.Windows.Forms
-          Add-Type -AssemblyName System.Drawing
-          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
-          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-          $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-          $screenshot = "desktop/release-test-assets/desktop-startup-smoke.png"
-          $bitmap.Save((Resolve-Path "desktop/release-test-assets").Path + "\desktop-startup-smoke.png", [System.Drawing.Imaging.ImageFormat]::Png)
-          $graphics.Dispose()
-          $bitmap.Dispose()
-          if (!(Test-Path $screenshot)) {
-            throw "Desktop startup screenshot was not created."
+          $assetDir = (Resolve-Path "desktop/release-test-assets").Path
+          $recording = Join-Path $assetDir "desktop-startup-smoke.mp4"
+          if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+            ffmpeg -y -f gdigrab -framerate 10 -i desktop -t 15 -pix_fmt yuv420p $recording
+            if (!(Test-Path $recording)) {
+              throw "Desktop startup recording was not created."
+            }
+          } else {
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $screenshot = Join-Path $assetDir "desktop-startup-smoke.png"
+            $bitmap.Save($screenshot, [System.Drawing.Imaging.ImageFormat]::Png)
+            $graphics.Dispose()
+            $bitmap.Dispose()
+            if (!(Test-Path $screenshot)) {
+              throw "Desktop startup screenshot was not created."
+            }
           }
           Stop-Process -Id $process.Id -Force
 
