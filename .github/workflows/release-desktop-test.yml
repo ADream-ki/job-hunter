@@ -116,6 +116,22 @@ jobs:
           Copy-Item ".codex-cargo-target/desktop-tauri/release/bundle/nsis/*" "desktop/release-test-assets/" -Force -ErrorAction SilentlyContinue
           Copy-Item "dist-release/*_test.zip" "desktop/release-test-assets/" -Force
 
+      - name: Smoke test portable desktop app
+        shell: pwsh
+        working-directory: source
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $exe = Join-Path "dist-release" "Career Harbor $version x64 test/Career Harbor.exe"
+          if (!(Test-Path $exe)) {
+            throw "Portable desktop executable was not created: $exe"
+          }
+          $process = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 12
+          if ($process.HasExited) {
+            throw "Portable desktop executable exited during startup smoke test with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force
+
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-release-test-assets
