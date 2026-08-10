@@ -154,8 +154,25 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $version = (Get-Content package.json | ConvertFrom-Json).version
+          $releaseDir = "desktop/.codex-temp/release-assets"
           node scripts/publish-r2-object.mjs --file desktop/.codex-temp/release-assets/latest.json --key career-harbor/desktop/latest.json --content-type "application/json; charset=utf-8" --cache-control "no-store, max-age=0, must-revalidate"
+          node scripts/publish-r2-object.mjs --file desktop/.codex-temp/release-assets/portable-latest.json --key career-harbor/desktop/portable-latest.json --content-type "application/json; charset=utf-8" --cache-control "no-store, max-age=0, must-revalidate"
+          Get-ChildItem -LiteralPath $releaseDir -File |
+            Where-Object { $_.Name -notin @("latest.json", "portable-latest.json", "RELEASE_NOTES.md") } |
+            ForEach-Object {
+              $assetName = $_.Name -replace "\s+", "."
+              $contentType = switch -Regex ($_.Name) {
+                "\.zip$" { "application/zip"; break }
+                "\.exe$" { "application/vnd.microsoft.portable-executable"; break }
+                "\.sig$" { "text/plain; charset=utf-8"; break }
+                "\.json$" { "application/json; charset=utf-8"; break }
+                default { "application/octet-stream" }
+              }
+              node scripts/publish-r2-object.mjs --file $_.FullName --key "career-harbor/desktop/releases/$version/$assetName" --content-type $contentType --cache-control "public, max-age=31536000, immutable"
+            }
           $env:GITHUB_RELEASE_TAG = "desktop-v$version"
           $env:GITHUB_RELEASE_NAME = "Career Harbor Desktop $version"
           $env:GITHUB_RELEASE_BODY = "desktop/.codex-temp/release-assets/RELEASE_NOTES.md"
