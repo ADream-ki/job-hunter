@@ -1,0 +1,91 @@
+name: Release Mobile Test
+
+on:
+  push:
+    tags:
+      - "mobile-test-v*"
+  workflow_dispatch:
+    inputs:
+      codeup_ref:
+        description: "Codeup mobile ref to build"
+        required: false
+        default: "master"
+
+permissions:
+  contents: read
+
+env:
+  CODEUP_REPOSITORY: ethan@codeup:codeup/job-hunter-mobile.git
+
+jobs:
+  android_release_test:
+    name: Android mobile release test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure Codeup SSH
+        shell: bash
+        env:
+          CODEUP_SSH_PRIVATE_KEY_B64: ${{ secrets.CODEUP_SSH_PRIVATE_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s' "$CODEUP_SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/codeup
+          chmod 600 ~/.ssh/codeup
+          ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host codeup
+            HostName ethan-cn-shenzhen.devops.aliyuncs.com
+            User ethan
+            IdentityFile $HOME/.ssh/codeup
+            IdentitiesOnly yes
+            PubkeyAcceptedAlgorithms +ssh-rsa
+            PubkeyAcceptedKeyTypes +ssh-rsa
+            HostkeyAlgorithms +ssh-rsa
+          EOF
+
+      - name: Clone Codeup mobile source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone "$CODEUP_REPOSITORY" source
+          cd source
+          git fetch --tags origin
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            if git rev-parse -q --verify "refs/tags/${GITHUB_REF_NAME}" >/dev/null; then
+              git checkout "${GITHUB_REF_NAME}"
+            else
+              echo "Codeup tag ${GITHUB_REF_NAME} does not exist."
+              exit 1
+            fi
+          else
+            git checkout "${{ inputs.codeup_ref }}"
+          fi
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Validate and build Android APK
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          flutter --version
+          flutter pub get
+          flutter analyze
+          flutter test
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name career_harbor_mobile --org com.jobtool .
+          fi
+          flutter build apk --release
+          mkdir -p release-test-assets
+          version="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          cp build/app/outputs/flutter-apk/app-release.apk "release-test-assets/Career.Harbor.Mobile_${version}_${GITHUB_REF_NAME:-manual}_android_test.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-release-test-apk
+          path: source/release-test-assets/*.apk
+          if-no-files-found: error
+          retention-days: 1
