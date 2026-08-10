@@ -1,0 +1,149 @@
+name: Release Mobile
+
+on:
+  push:
+    tags:
+      - "mobile-v*"
+  workflow_dispatch:
+    inputs:
+      codeup_ref:
+        description: "Codeup mobile ref to build"
+        required: false
+        default: "master"
+
+permissions:
+  contents: write
+
+env:
+  CODEUP_REPOSITORY: ethan@codeup:codeup/job-hunter-mobile.git
+  GITHUB_REPOSITORY: ADream-ki/job-hunter
+  R2_OBJECT_PREFIX: career-harbor
+  R2_PUBLIC_BASE_URL: https://download.o2dream.cc
+
+jobs:
+  android_release:
+    name: Android mobile release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure Codeup SSH
+        shell: bash
+        env:
+          CODEUP_SSH_PRIVATE_KEY_B64: ${{ secrets.CODEUP_SSH_PRIVATE_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s' "$CODEUP_SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/codeup
+          chmod 600 ~/.ssh/codeup
+          ssh-keyscan -t rsa,ed25519 ethan-cn-shenzhen.devops.aliyuncs.com >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host codeup
+            HostName ethan-cn-shenzhen.devops.aliyuncs.com
+            User ethan
+            IdentityFile $HOME/.ssh/codeup
+            IdentitiesOnly yes
+            PubkeyAcceptedAlgorithms +ssh-rsa
+            PubkeyAcceptedKeyTypes +ssh-rsa
+            HostkeyAlgorithms +ssh-rsa
+          EOF
+
+      - name: Clone Codeup mobile source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone "$CODEUP_REPOSITORY" source
+          cd source
+          git fetch --tags origin
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            git checkout "$GITHUB_REF_NAME"
+          else
+            git checkout "${{ inputs.codeup_ref }}"
+          fi
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Validate version
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          version="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          tag="${GITHUB_REF_NAME:-mobile-v$version}"
+          if [ "${GITHUB_REF_TYPE:-}" != "tag" ]; then
+            tag="mobile-v$version"
+          fi
+          if [ "$tag" != "mobile-v$version" ]; then
+            echo "Release tag $tag does not match mobile-v$version."
+            exit 1
+          fi
+
+      - name: Build Android APK
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          flutter --version
+          flutter pub get
+          flutter analyze
+          flutter test
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name career_harbor_mobile --org com.jobtool .
+          fi
+          flutter build apk --release
+          version="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          mkdir -p release-assets
+          cp build/app/outputs/flutter-apk/app-release.apk "release-assets/Career.Harbor.Mobile_${version}_android.apk"
+          sha256sum "release-assets/Career.Harbor.Mobile_${version}_android.apk" | awk '{print $1}' > release-assets/apk.sha256
+          size="$(stat -c%s "release-assets/Career.Harbor.Mobile_${version}_android.apk")"
+          sha="$(cat release-assets/apk.sha256)"
+          cat > release-assets/latest.json <<EOF
+          {
+            "version": "$version",
+            "platform": "android",
+            "format": "apk",
+            "url": "${R2_PUBLIC_BASE_URL}/${R2_OBJECT_PREFIX}/mobile/releases/${version}/Career.Harbor.Mobile_${version}_android.apk",
+            "sha256": "$sha",
+            "size": $size
+          }
+          EOF
+          cat > release-assets/RELEASE_NOTES.md <<EOF
+          Career Harbor Mobile $version
+
+          - Android APK built from Codeup mobile source.
+          EOF
+
+      - name: Install AWS CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Publish mobile artifacts
+        shell: bash
+        working-directory: source
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          apk="release-assets/Career.Harbor.Mobile_${version}_android.apk"
+          aws --endpoint-url "$endpoint" s3 cp "$apk" "s3://${R2_BUCKET_NAME}/${R2_OBJECT_PREFIX}/mobile/releases/${version}/Career.Harbor.Mobile_${version}_android.apk" --content-type "application/vnd.android.package-archive" --cache-control "public, max-age=31536000, immutable"
+          aws --endpoint-url "$endpoint" s3 cp release-assets/latest.json "s3://${R2_BUCKET_NAME}/${R2_OBJECT_PREFIX}/mobile/latest.json" --content-type "application/json; charset=utf-8" --cache-control "no-store, max-age=0, must-revalidate"
+          gh release create "mobile-v${version}" "$apk" release-assets/latest.json --repo "$GITHUB_REPOSITORY" --title "Career Harbor Mobile $version" --notes-file release-assets/RELEASE_NOTES.md --latest=false || \
+            gh release upload "mobile-v${version}" "$apk" release-assets/latest.json --repo "$GITHUB_REPOSITORY" --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-release-assets
+          path: source/release-assets/*
+          if-no-files-found: error
+          retention-days: 1
