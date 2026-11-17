@@ -82,6 +82,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          node scripts/verify-desktop-release-readiness.mjs check
+          if ($LASTEXITCODE -ne 0) { throw "Desktop release readiness checks failed." }
+          node --import tsx scripts/test-zcode-browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Native browser boundary tests failed." }
+          node --import tsx scripts/test-job-browser-collection.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Job collection script tests failed." }
+          cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml --lib --target-dir .codex-cargo-target/desktop-tauri
+          if ($LASTEXITCODE -ne 0) { throw "Native browser and PageSift tests failed." }
           npm.cmd --prefix desktop run tauri:build -- --bundles nsis
           cargo build --release --manifest-path desktop/src-tauri/Cargo.toml --bin job_tool --target-dir .codex-cargo-target/desktop-tauri
           $version = (Get-Content package.json | ConvertFrom-Json).version
@@ -90,6 +98,7 @@ jobs:
           $zip = Join-Path $dist "Career.Harbor_${version}_${env:GITHUB_REF_NAME}_x64_portable_test.zip"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job-tool-desktop.exe" -Destination (Join-Path $stage "Career Harbor.exe") -Force
+          Copy-Item -LiteralPath "desktop/src-tauri/notices" -Destination (Join-Path $stage "notices") -Recurse -Force
           Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job_tool.exe" -Destination (Join-Path $stage "career-harbor-cli.exe") -Force
           Copy-Item -LiteralPath ".codex-cargo-target/desktop-tauri/release/job_tool.exe" -Destination (Join-Path $stage "career-harbor-helper.exe") -Force
           $llamaStage = Join-Path $stage "llama"
